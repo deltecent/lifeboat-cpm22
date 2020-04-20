@@ -1,0 +1,58 @@
+READ-ME file for CP/M2 on Altair
+Current version is 2.20 - Jul 22, 1981
+
+This file contains up to date information
+that is not yet in the User's Notes and should always
+be read first when ever your CP/M is updated.
+
+The meaning of a version number such as x.xyz is as follows.
+The first two digits "x.x" are the Digital Research version.
+The "y" is the Lifeboat release number, with optional "z"
+being a minor patch in same.  "DQ" means double/quad
+and "SD" means single density.
+
+
+The information below reflects various version changes.
+
+(4/29/78) Version 1.40
+---------------------
+
+	This original CP/M on Altair from Lifeboat Associates
+was the first available.
+
+
+(7/22/81) Version 2.20
+----------------------
+
+	This is the first release of CP/M version 2
+on Altair.
+
+
+	Features in this CP/M over the 1.4 version include:
+	--------------------------------------------------
+
+1.	The CONFIG program now allows installation of a printer
+	driver.
+
+2.  	SETCPM program allows inspection and change
+	of most system options.
+
+3.	A single drive system may be used as a four drive
+	logical system.  CP/M will prompt you to switch disks.
+
+4.	Disk files are completely compatable with CP/M 1.4 files.
+
+
+	The file USER.ASM on this disk is the same
+as produced by CONFIG.COM using terminal 0.  This is
+correct for an Altair 88-2SIO or Turnkey board.
+
+	Please note that an extra jump in the USER AREA
+jump table has been added.  This is for initialization on
+warm boots and  has the effect of moving all JMP's in the
+jump table down one,  except for the first (cold init).
+
+	If you are using an old USER.ASM file which you
+have modified, change it accordingly.  Also make sure the
+equates in your file for BIOS and USER are the same as
+the file on this disk.
