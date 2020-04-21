@@ -1,6 +1,6 @@
 ;--------------------------------------------------------------------
 ;
-;	CP/M 2.20 BIOS for Lifeboat Associates CP/M2 for
+;	CP/M 2.2 BIOS for Lifeboat Associates CP/M2 Vers 2.20 on
 ;	MITS Altair 8800x and 88-DCCD Floppy Drive
 ;
 ;	Original disassembly of the Lifeboat BIOS from LIFEBOAT.DSK
