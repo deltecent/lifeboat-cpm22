@@ -8,15 +8,23 @@
 ; CPM module locations
 
 
+bootLen	equ	3*128		;Boot Length
 ccpLen	equ	0800h		;CPM 2.2 fixed
 bdosLen	equ	0e00h		;CPM 2.2 fixed
 ccp	equ	$-bdosLen-ccpLen
 bdos	equ	$-bdosLen
+bios	equ	$
+
+; CCP
+
+cmdLen	equ	ccp+7		;command length
 
 ; CPM page zero equates
 
 wbootv	equ	000h		;warm boot vector location
+wboota	equ	001h		;warm boot vector address
 bdosv	equ	005h		;bdos entry vector location
+bdosa	equ	006h		;address field of jmp BDOS
 cdisk	equ	004h		;CPM current disk
 defDma	equ	080h		;default dma address
 
@@ -90,121 +98,128 @@ lf	equ	10		;ascii for line feed
 ;
 ;-----------------------------------------------------------------------------
 ;
-	jmp	boot		;d700	c3 82 d7 	. . . 
-wboote:	jmp	wboot		;d703	c3 8c d7 	. . . 
-	jmp	const		;d706	c3 06 dc 	. . . 
-	jmp	conin		;d709	c3 c9 d8 	. . . DC09?
-	jmp	conout		;d70c	c3 0c dc 	. . . 
-	jmp	list		;d70f	c3 0f dc 	. . . 
-	jmp	punch		;d712	c3 12 dc 	. . . 
-	jmp	reader		;d715	c3 15 dc 	. . . 
-	jmp	home		;d718	c3 8d d8 	. . . 
-	jmp	seldsk		;d71b	c3 6b d8 	. k . 
-	jmp	settrk		;d71e	c3 8f d8 	. . . 
-	jmp	setsec		;d721	c3 94 d8 	. . . 
-	jmp	setdma		;d724	c3 99 d8 	. . . 
-	jmp	read		;d727	c3 d7 d8 	. . . 
-	jmp	write		;d72a	c3 e3 d8 	. . . 
-	jmp	listst		;d72d	c3 18 dc 	. . . 
-	jmp	sectran		;d730	c3 9f d8 	. . . 
+	jmp	boot
+wboote:	jmp	wboot
+	jmp	const
+	jmp	coninul		;d709	c3 c9 d8 	. . . conin with unload?
+	jmp	conout
+	jmp	list
+	jmp	punch
+	jmp	reader
+	jmp	home
+	jmp	seldsk
+	jmp	settrk
+	jmp	setsec
+	jmp	setdma
+	jmp	read
+	jmp	write
+	jmp	listst
+	jmp	sectran
 
 signon:
 	db	cr,lf
 	db	'CP/M2 on Altair',cr,lf
 	db	'56K Vers 2.20  ',cr,lf
 	db	'(c) 1981 Lifeboat Associates$'
-;
-prmsg:	;print message at h,l to '$'
-	mov	a,m			;d774	7e 	~ 
-	cpi	'$'		;d775	fe 24 	. $ 
-	rz			;d777	c8 	. 
-	mov	c,m			;d778	4e 	N 
-	inx	h			;d779	23 	# 
-	push	h			;d77a	e5 	. 
-	call	conout		;d77b	cd 0c dc 	. . . 
-	pop	h			;d77e	e1 	. 
-	jmp	prmsg		;d77f	c3 74 d7 	. t . 
-;
+
+; print message at HL to '$'
+
+prmsg:	mov	a,m
+	cpi	'$'
+	rz
+	mov	c,m
+	inx	h
+	push	h
+	call	conout
+	pop	h
+	jmp	prmsg
+
+;----------------------------------------------------------------------------
+; boot - Cold boot BIOS entry. CPM is already loaded in memory. Hand
+;    control to the CCP.
+;----------------------------------------------------------------------------
 boot:
-	xra	a			;d782	af 	. 
+	xra	a
 	sta	cdisk		;set initially to disk a
-	call	sdc00h		;initialize user area
-	jmp	gocpm		;go to cp/m
-;
+	call	cinit		;initialize user area
+	jmp	entCpm		;go to cp/m
+
+;----------------------------------------------------------------
+; wboot - Warm boot BIOS entry. Reload CPM from disk up to, but
+;    not including the BIOS. Re-enter CPM after loading.
+;----------------------------------------------------------------
 wboot:
-	lxi	sp,00100h		;d78c	31 00 01 	1 . . 
-	call	sdb95h		;d78f	cd 95 db 	. . . 
-	xra	a			;d792	af 	. 
-	sta	diskNum		;d793	32 95 df 	2 . . 
-	sta	trkNum		;d796	32 96 df 	2 . . 
-	lxi	h,0bf80h		;d799	21 80 bf 	. . . 
-	inr	a			;d79c	3c 	< 
-	call	sd7e8h		;d79d	cd e8 d7 	. . . 
-	mvi	a,001h		;d7a0	3e 01 	> . 
-	sta	trkNum		;d7a2	32 96 df 	2 . . 
-	lxi	h,0cf80h		;d7a5	21 80 cf 	. . . 
-	call	sd7e8h		;d7a8	cd e8 d7 	. . . 
-ld7abh:
-	call	sdc03h		;d7ab	cd 03 dc 	. . . 
-;
-gocpm:
-;
-;	reset monitor entry points
-	mvi	a,jmp		;d7ae	3e c3 	> . 
-	sta	wbootv		;d7b0	32 00 00 	2 . . 
-	sta	bdosv		;d7b3	32 05 00 	2 . . 
-	lxi	h,wboote		;d7b6	21 03 d7 	. . . 
-	shld	1		;d7b9	22 01 00 	" . . 
-ld7bch:
-	lxi	h,bdos+6		;d7bc	21 06 c9 	. . . 
-	shld	6		;d7bf	22 06 00 	" . . 
-	lxi	h,0df9dh		;d7c2	21 9d df 	. . . 
-	mov	a,m			;d7c5	7e 	~ 
-	ora	a			;d7c6	b7 	. 
-	mvi	m,001h		;d7c7	36 01 	6 . 
-	push	psw			;d7c9	f5 	. 
-	lxi	h,signon		;d7ca	21 33 d7 	. 3 . 
-	cz	prmsg		;d7cd	cc 74 d7 	. t . 
-	pop	psw			;d7d0	f1 	. 
-	lxi	h,cdisk		;d7d1	21 04 00 	. . . 
-	mov	c,m			;d7d4	4e 	N 
-	lda	flags		;d7d5	3a ff db 	: . . 
-	jz	ld7e0h		;d7d8	ca e0 d7 	. . . 
-	ani	fWrmCmd		;d7db	e6 02 	. . 
-	jmp	ld7e2h		;d7dd	c3 e2 d7 	. . . 
-;
-ld7e0h:
-	ani	001h		;d7e0	e6 01 	. . 
-;
-ld7e2h:
-	jz	ccp+3		;d7e2	ca 03 c1 	. . . 
-	jmp	ccp		;d7e5	c3 00 c1 	. . . 
-;
-sd7e8h:
-	sta	secNum		;d7e8	32 97 df 	2 . . 
-	shld	dmaAddr		;d7eb	22 98 df 	" . . 
-	mov	a,h			;d7ee	7c 	| 
-	cpi	0d7h		;d7ef	fe d7 	. . 
-	jnc	ld7ffh		;d7f1	d2 ff d7 	. . . 
-	cpi	0c1h		;d7f4	fe c1 	. . 
-	jc	ld7ffh		;d7f6	da ff d7 	. . . 
-	call	read		;d7f9	cd d7 d8 	. . . 
-	jnz	wboot		;d7fc	c2 8c d7 	. . . 
-;
-ld7ffh:
-	lhld	dmaAddr		;d7ff	2a 98 df 	* . . 
-	lxi	d,00100h		;d802	11 00 01 	. . . 
-	dad	d			;d805	19 	. 
-	lda	secNum		;d806	3a 97 df 	: . . 
-	adi	002h		;d809	c6 02 	. . 
-	cpi	021h		;d80b	fe 21 	. . 
-	jc	sd7e8h		;d80d	da e8 d7 	. . . 
-	sui	01fh		;d810	d6 1f 	. . 
-	lxi	d,0f080h		;d812	11 80 f0 	. . . 
-	dad	d			;d815	19 	. 
-	cpi	003h		;d816	fe 03 	. . 
-	jnz	sd7e8h		;d818	c2 e8 d7 	. . . 
-	ret			;d81b	c9 	. 
+	lxi	sp,0100h	;init stack pointer
+	call	clrDrv		;clear selected drive and track table
+	xra	a
+	sta	diskNum		;disk zero is boot disk
+	sta	trkNum		;set track number to zero
+	lxi	h,ccp-bootLen	;track 0 sector 1 is boot loader
+	inr	a		;sector 1
+	call	loadTrk		;load track 0
+	mvi	a,1		;track 1
+	sta	trkNum
+	lxi	h,ccp+0e80h
+	call	loadTrk
+	call	winit
+
+; entCpm: - enter CPM. Set page zero variables, enter CPM with or without
+;   command line based on
+
+entCpm:	mvi	a,0c3h		;8080 "jmp" opcode
+	sta	wbootv		;store in 1st byte of warm boot vector
+	sta	bdosv		;and 1st byte of bdos entry vector
+	lxi	h,wboote	;get the warm boot address
+	shld	wbootv+1	;and put it after the jmp
+	lxi	h,bdos+6	;BDOS entry address
+	shld	6		;
+	lxi	h,cldDone	;get the "cold start done" flag
+	mov	a,m
+	ora	a
+	mvi	m,1		;set the flag true - cold start has been done
+	push	psw
+	lxi	h,signon	;display sign on banner
+	cz	prmsg
+	pop	psw
+	lxi	h,cdisk		;get current disk number
+	mov	c,m		;c = current disk number
+	lda	flags		;check the proper "process command line" flag
+	jz	coldSt		;jump if this is cold start
+	ani	fWrmCmd		;warm start - run default command line?
+	jmp	cmdChk
+coldSt:	ani	fCldCmd		;cold start - run default command line?
+cmdChk:	jz	ccp+3		;no, enter ccp and clear cmd line
+	jmp	ccp		;yes, enter ccp with possible cmd line
+
+
+; loadTrk - load one track into memory. Read odd sectors into every other 
+;    128 bytes of memory until the BIOS base address is reached or all
+;    32 sectors in the track have been read. Then read even sectors into
+;    the opposite 128 byte sections of memory until the BIOS base address
+;    is reached or all 32 sectors in the track have been read.
+
+loadTrk	sta	secNum		;save the sector number to we're on
+	shld	dmaAddr		;save the destination address
+	mov	a,h
+	cpi	(bios shr 8)	;current address >= bios start address?
+	jnc	nxtSec		;yes, skip read (don't overwrite bios)
+	cpi	(ccp shr 8)	;current address < ccp start address?
+	jc	nxtSec		;yes, skip read (not to valid data yet)
+	call	read		;read a sector
+	jnz	wboot		;fatal read error
+nxtSec	lhld	dmaAddr		;hl = destination address
+	lxi	d,0100h		;increment destination address by 256 bytes
+	dad	d
+	lda	secNum		;a = sector number
+	adi	2		;jump 2 sectors each read
+	cpi	numSect+1	;past the last sector in the track?
+	jc	loadTrk		;not yet, keep reading
+	sui	numSect-1	;compute starting even sector number
+	lxi	d,-0f80h	;compute load address for 1st even sector
+	dad	d
+	cpi	3		;done both odd and even sectors in a track?
+	jnz	loadTrk		;no, go do even sectors
+	ret
 
 ;-----------------------------------------------------------------------------
 ; dpHead - disk parameter header for each drive
@@ -241,28 +256,26 @@ mitsDrv:
 ;    selected disk number is stored in diskNum. No actual drive activity 
 ;    takes place.
 ;----------------------------------------------------------------------------
-seldsk:
-	mov	a,c			;d86b	79 	y 
-	ani	07fh		;d86c	e6 7f 	.  
-	lxi	h,numDisk		;d86e	21 fb db 	. . . 
-	cmp	m			;d871	be 	. 
-	jnc	selerr		;d872	d2 84 d8 	. . . 
-	sta	diskNum		;d875	32 95 df 	2 . . 
-	mvi	h,0		;d878	26 00 	& . 
-	mov	l,a			;d87a	6f 	o 
-	dad	h			;d87b	29 	) 
-	dad	h			;d87c	29 	) 
-	dad	h			;d87d	29 	) 
-	dad	h			;d87e	29 	) 
-	lxi	d,dpHead		;d87f	11 1c d8 	. . . 
-	dad	d			;d882	19 	. 
-	ret			;d883	c9 	. 
-selerr:
-	lxi	h,0		;d884	21 00 00 	. . . 
-	xra	a			;d887	af 	. 
-	sta	cdisk		;d888	32 04 00 	2 . . 
-	inr	a			;d88b	3c 	< 
-	ret			;d88c	c9 	. 
+seldsk	mov	a,c		;a = drive number
+	ani	07fh
+	lxi	h,numDisk	;verify drive number less than number of disks
+	cmp	m
+	jnc	selerr		;drive number error
+	sta	diskNum		;save the selected disk number
+	mvi	h,0		;compute disk parameter header address
+	mov	l,a		;(16*drvNum) + dpHead
+	dad	h
+	dad	h
+	dad	h
+	dad	h
+	lxi	d,dpHead
+	dad	d		;hl points to the DPH for the passed drive
+	ret
+selerr	lxi	h,0		;error - hl = 0, cdisk = 0, a = 1
+	xra	a
+	sta	cdisk
+	inr	a
+	ret
 
 ;----------------------------------------------------------------------------
 ; home - Home BIOS entry. Move to track zero position.
@@ -274,9 +287,9 @@ home:	mvi	c,0		;d88d	0e 00 	. .
 ;    The track number is saved in trkNum for later use. No actual
 ;    drive activity takes place.
 ;----------------------------------------------------------------------------
-settrk:	mov	a,c			;d88f	79 	y 
-	sta	trkNum		;d890	32 96 df 	2 . . 
-	ret			;d893	c9 	. 
+settrk:	mov	a,c
+	sta	trkNum
+	ret
 
 ;----------------------------------------------------------------------------
 ; setsec - Set Sector BIOS entry. C contains the desired sector number.
@@ -284,46 +297,45 @@ settrk:	mov	a,c			;d88f	79 	y
 ;    The sector number is saved in secNum for later use. No actual
 ;    drive activity takes place.
 ;----------------------------------------------------------------------------
-setsec:	mov	a,c			;d894	79 	y 
-	sta	secNum		;d895	32 97 df 	2 . . 
-	ret			;d898	c9 	. 
+setsec:	mov	a,c
+	sta	secNum
+	ret
 
 ;----------------------------------------------------------------------------
 ; setdma - Set DMA BIOS entry. BC contains the address for reading or
 ;    writing sector data for subsequent I/O operations. The address is
 ;    stored in dmaAddr.
 ;----------------------------------------------------------------------------
-setdma:	mov	h,b			;d899	60 	` 
-	mov	l,c			;d89a	69 	i 
-	shld	dmaAddr		;d89b	22 98 df 	" . . 
-	ret			;d89e	c9 	. 
+setdma:	mov	h,b
+	mov	l,c
+	shld	dmaAddr
+	ret
+
 ;----------------------------------------------------------------------------
 ; sectran - Sector translation BIOS entry. Convert logical sector number in
 ;    BC to physical sector number in HL using the skew table passed in DE.
 ;----------------------------------------------------------------------------
 sectran:
-	lxi	h,xlate		;d89f	21 a9 d8 	. . . 
-	mvi	b,0		;d8a2	06 00 	. . 
-	dad	b			;d8a4	09 	. 
-	mov	l,m			;d8a5	6e 	n 
-	mvi	h,0		;d8a6	26 00 	& . 
-	ret			;d8a8	c9 	. 
+	lxi	h,xlate		;table address into HL
+	mvi	b,0		;clear b
+	dad	b		;offset to logical sector number
+	mov	l,m		;get physical sector in L
+	mvi	h,0		;set H to zero
+	ret
 
 ;---------------------------------------------------------------------------
 ; xlate - sector translation table for skew
 ;---------------------------------------------------------------------------
 xlate:
-	db	1,9,17,25,3,11,19,27
-	db	5,13,21,29,7,15,23,31
-	db	2,10,18,26,4,12,20,28
-	db	6,14,22,30,8,16,24,32
-;
-	call	uldHead		;d8c9	cd 90 db
-	jmp	0dc09h		;d8cc
-	push	b		;d8cf
-	call	uldHead		;d8d0	cd 90 db
-	pop	b		;d8d3	c1	.
-	jmp	list		;d8d4	c3 0f dc 	. . . 
+	db	01,09,17,25,03,11,19,27,05,13,21,29,07,15,23,31
+	db	02,10,18,26,04,12,20,28,06,14,22,30,08,16,24,32
+
+coninul	call	uldHead         ;d8c9   cd 90 db
+	jmp	conin           ;d8cc
+	push	b               ;d8cf
+	call	uldHead         ;d8d0   cd 90 db
+	pop	b               ;d8d3   c1      .
+	jmp	list            ;d8d4   c3 0f dc  
 
 ;----------------------------------------------------------------------------
 ; read - Read sector BIOS entry. Read one sector using the trkNum, secNum
@@ -352,492 +364,531 @@ write:
 	ani	fWrtVfy		;are we verifying writes?
 	jz	exitDio		;no, exit
 	mvi	a,1		;set the "verify track number" flag to true
-	call	rTrkSec		;d8f8	cd 11 d9 	. . . 
-	lxi	h,altBuf		;d8fb	21 00 de 	. . . 
-	call	readSec		;d8fe	cd 5f d9 	. _ . 
-exitDio:
-	push	psw			;d901	f5 	. 
-	lda	flags		;d902	3a ff db 	: . . 
-	ani	fEnaInt		;d905	e6 10 	. . 
-	jz	noInts		;d907	ca 0b d9 	. . . 
-	ei			;d90a	fb 	. 
-noInts:
-	pop	psw			;d90b	f1 	. 
-	mvi	a,0		;d90c	3e 00 	> . 
-	rz			;d90e	c8 	. 
-	inr	a			;d90f	3c 	< 
-	ret			;d910	c9 	. 
-;
-; rTrkSec - return track in c, physical sector in b
-rTrkSec:
-	sta	trkVrfy		;d911	32 9a df 	2 . . 
-	lda	diskNum		;d914	3a 95 df 	: . . 
-	mov	c,a			;d917	4f 	O 
-	call	chkmnt		;d918	cd 26 d9 	. & . 
-	mov	a,c			;d91b	79 	y 
-	sta	diskNum		;d91c	32 95 df 	2 . . 
-	lhld	trkNum		;d91f	2a 96 df 	* . . 
-	mov	c,l			;d922	4d 	M 
-	dcr	h			;d923	25 	% 
-	mov	b,h			;d924	44 	D 
-	ret			;d925	c9 	. 
-;
-chkmnt:
-	lda	flags		;d926	3a ff db 	: . . 
-	ani	004h		;d929	e6 04 	. . 
-	rz			;d92b	c8 	. 
-	lxi	h,mntdrv		;d92c	21 50 d9 	. P . 
-	mov	a,c			;d92f	79 	y 
-	adi	'A'		;d930	c6 41 	. A 
-	cmp	m			;d932	be 	. 
-	jz	mounted		;d933	ca 40 d9 	. @ . 
-	mov	m,a			;d936	77 	w 
-	lxi	h,mount		;d937	21 43 d9 	. C . 
-	call	prmsg		;d93a	cd 74 d7 	. t . 
-	call	conin		;d93d	cd 09 dc 	. . . 
-mounted:
-	mvi	c,0		;d940	0e 00 	. . 
-	ret			;d942	c9 	. 
+	call	rTrkSec		;retrieve track in c, physical sector in b
+	lxi	h,altBuf	; (this isn't actually used by readSec)
+	call	readSec		;read the sector just written
 
-mount:	db	cr,lf,'mount disk '
+;  exitDio - exit disk i/o. Restore interrupts if enable interrupt flag is
+;     set.
+
+exitDio:
+	push	psw
+	lda	flags
+	ani	fEnaInt		;should we re-enable interrupts?
+	jz	noInts		;no
+	ei
+noInts:	pop	psw
+	mvi	a,0		;return error code of zero (success)
+	rz
+	inr	a		;increment total fail count
+	ret
+
+; rTrkSec - return track in c, physical sector in b
+
+rTrkSec:
+	sta	trkVrfy		;save the passed track verify flag
+	lda	diskNum
+	mov	c,a
+	call	chkMnt		;manually mount another disk?
+	mov	a,c
+	sta	diskNum		;update disk number
+	lhld	trkNum		;L = track number, H = sector number
+	mov	c,l
+	dcr	h		;conver 1-32 to 0-31 for altair hardware
+	mov	b,h
+	ret
+
+; chkMnt - check if we need to mount another disk in this drive
+
+chkMnt:
+	lda	flags
+	ani	fMntDsk
+	rz			;return if single disk mounting disabled
+	lxi	h,mntdrv
+	mov	a,c
+	adi	'A'		;are we mounting a different drive?
+	cmp	m
+	jz	mounted		;no, drive is already mounted
+	mov	m,a
+	lxi	h,mount		;prompt to change disks
+	call	prmsg
+	call	conin		;wait for character input
+mounted:
+	mvi	c,0
+	ret
+
+mount:	db	cr,lf,'Mount disk '
 mntdrv	db	'A'
 	db	', then <cr>',cr,lf,'$'
 
+;-----------------------------------------------------------------------------
+; readSec - read sector. Selects the drive in diskNum, seeks to the track
+;    in C and then reads the sector specified in B into the buffer
+;    pointed to by dmaAddr.
+;----------------------------------------------------------------------------
 readSec:
-	call	selTrk		;d95f	cd e6 da 	. . . 
-	rnz			;d962	c0 	. 
+	call	selTrk		;select the drive, seek to the proper track
+	rnz			;exit if error
 reReadP:
-	push	b			;d963	c5 	. 
+	push	b		;save sector number
 reRead:
-	call	rtryChk		;d964	cd cd db 	. . . 
-	pop	b			;d967	c1 	. 
-	rnz			;d968	c0 	. 
-	push	b			;d969	c5 	. 
-	mov	a,b			;d96a	78 	x 
-	call	altSkew		;d96b	cd d5 da 	. . . 
-	lxi	h,altBuf		;d96e	21 00 de 	. . . 
-	call	rdPSec		;d971	cd f4 d9 	. . . 
-	lda	flags		;d974	3a ff db 	: . . 
-	ani	fRawIO		;d977	e6 08 	. . 
-	jnz	rdExit		;d979	c2 f1 d9 	. . . 
-	lda	trkNum		;d97c	3a 96 df 	: . . 
-	cpi	6		;d97f	fe 06 	. . 
-	jnc	rTrk676		;d981	d2 ac d9 	. . . 
-	lxi	h,altBuf+t0Stop		;d984	21 83 de 	. . . 
-	inr	m			;d987	34 	4 
-	jnz	reRead		;d988	c2 64 d9 	. d . 
-	lxi	h,altBuf		;d98b	21 00 de 	. . . 
-	mov	a,m			;d98e	7e 	~ 
-	ani	07fh		;d98f	e6 7f 	.  
-	pop	b			;d991	c1 	. 
-	cmp	c			;d992	b9 	. 
-	jnz	rdTrkEr		;d993	c2 ea d9 	. . . 
-	push	b			;d996	c5 	. 
-	lhld	dmaAddr		;d997	2a 98 df 	* . . 
-	mov	b,h			;d99a	44 	D 
-	mov	c,l			;d99b	4d 	M 
-	lxi	h,altBuf+t0Data		;d99c	21 03 de 	. . . 
-	call	moveBuf		;d99f	cd c6 da 	. . . 
-	lxi	h,altBuf+t0CSum		;d9a2	21 84 de 	. . . 
-	cmp	m			;d9a5	be 	. 
-	jnz	reRead		;d9a6	c2 64 d9 	. d . 
-	pop	b			;d9a9	c1 	. 
-	xra	a			;d9aa	af 	. 
-	ret			;d9ab	c9 	. 
+	call	rtryChk		;decrement and check retry counter
+	pop	b
+	rnz			;return if no more retries
+	push	b
+	mov	a,b		;a=sector number
+	call	altSkew		;do 17 sector skew like Altair Basic does
+	lxi	h,altBuf	;hl points to altair sector buffer
+	call	rdPSec		;read physical sector
+	lda	flags		;raw I/O or normal to move to (dmaAddr)?
+	ani	fRawIO
+	jnz	rdExit		;raw I/O, leave data in altBuf and exit
+	lda	trkNum		;process data differently depending on track#
+	cpi	6		;tracks 0-5 processed directly below
+	jnc	rTrk676		;jmp for tracks 6-76
 
-rTrk676:
-	dcx	h			;d9ac	2b 	+ 
-	mov	a,m			;d9ad	7e 	~ 
-	ora	a			;d9ae	b7 	. 
-	jnz	reRead		;d9af	c2 64 d9 	. d . 
-	dcx	h			;d9b2	2b 	+ 
-	inr	m			;d9b3	34 	4 
-	jnz	reRead		;d9b4	c2 64 d9 	. d . 
-	lxi	h,altBuf		;d9b7	21 00 de 	. . . 
-	mov	a,m			;d9ba	7e 	~ 
-	ani	07fh		;d9bb	e6 7f 	.  
-	pop	b			;d9bd	c1 	. 
-	cmp	c			;d9be	b9 	. 
-	jnz	rdTrkEr		;d9bf	c2 ea d9 	. . . 
-	inx	h			;d9c2	23 	# 
-	mov	a,m			;d9c3	7e 	~ 
-	cmp	b			;d9c4	b8 	. 
-	jnz	reReadP		;d9c5	c2 63 d9 	. c . 
-	push	b			;d9c8	c5 	. 
-	lhld	dmaAddr		;d9c9	2a 98 df 	* . . 
-	mov	b,h			;d9cc	44 	D 
-	mov	c,l			;d9cd	4d 	M 
-	lxi	h,altBuf+t6Data		;d9ce	21 07 de 	. . . 
-	call	moveBuf		;d9d1	cd c6 da 	. . . 
-	lxi	h,altBuf+6		;d9d4	21 06 de 	. . . 
-	mov	b,m			;d9d7	46 	F 
-	dcx	h			;d9d8	2b 	+ 
-	mov	c,m			;d9d9	4e 	N 
-	dcx	h			;d9da	2b 	+ 
-	mov	d,m			;d9db	56 	V 
-	dcx	h			;d9dc	2b 	+ 
-	mov	e,m			;d9dd	5e 	^ 
-	dcx	h			;d9de	2b 	+ 
-	add	e			;d9df	83 	. 
-	add	b			;d9e0	80 	. 
-	add	c			;d9e1	81 	. 
-	add	m			;d9e2	86 	. 
-	cmp	d			;d9e3	ba 	. 
-	jnz	reRead		;d9e4	c2 64 d9 	. d . 
-	pop	b			;d9e7	c1 	. 
-	xra	a			;d9e8	af 	. 
-	ret			;d9e9	c9 	. 
+; validate and move data for sectors in tracks 0 - 5
 
-rdTrkEr:
-	xra	a			;d9ea	af 	. 
-	call	reTkSec		;d9eb	cd f2 da 	. . . 
-	jmp	reReadP		;d9ee	c3 63 d9 	. c . 
+	lxi	h,altBuf+t0Stop	;should have 0ffh at byte 131 in altBuf
+	inr	m
+	jnz	reRead		;wasn't 255, re-try the sector read
+	lxi	h,altBuf+t0Trk	;track number + 80h at byte 0 in altBuf
+	mov	a,m
+	ani	07fh		;get track number alone
+	pop	b
+	cmp	c		;track number in c match track # in data?
+	jnz	rdTrkEr		;no, have track number error
+	push	b
+	lhld	dmaAddr		;hl = destination address for the data
+	mov	b,h		;put hl into bc
+	mov	c,l
+	lxi	h,altBuf+t0Data	;data starts at byte 3 of altBuf
+	call	moveBuf		;move cpm sector to (dmaAddr), return checksum
+	lxi	h,altBuf+t0CSum	;sector checksum is in altBuf + 132
+	cmp	m
+	jnz	reRead		;checksum fail, re-try the sector read
+	pop	b
+	xra	a		;return success code
+	ret
 
-rdExit:
-	pop	b			;d9f1	c1 	. 
-	xra	a			;d9f2	af 	. 
-	ret			;d9f3	c9 	. 
+;  rTrk676 - validate and move data for sectors in tracks 6-76
 
-rdPSec:
-	call	setSync		;d9f4	cd 12 da 	. . . 
-	mvi	c,altLen		;d9f7	0e 89 	. . 
-rdLoop:
-	in	drvStat		;d9f9	db 08 	. . 
-	ora	a			;d9fb	b7 	. 
-	jm	rdLoop		;d9fc	fa f9 d9 	. . . 
-	in	drvData		;d9ff	db 0a 	. . 
-	mov	m,a			;da01	77 	w 
-	inx	h			;da02	23 	# 
-	dcr	c			;da03	0d 	. 
-	jz	rDone		;da04	ca 10 da 	. . . 
-	dcr	c			;da07	0d 	. 
-	nop			;da08	00 	. 
-	in	drvData		;da09	db 0a 	. . 
-	mov	m,a			;da0b	77 	w 
-	inx	h			;da0c	23 	# 
-	jnz	rdLoop		;da0d	c2 f9 d9 	. . . 
-rDone:
-	xra	a			;da10	af 	. 
-	ret			;da11	c9 	. 
-setSync:
-	call	ldHead		;da12	cd 7f db 	.  . 
-wtSecTr:
-	in	drvSec		;da15	db 09 	. . 
-	rar			;da17	1f 	. 
-	jc	wtSecTr		;da18	da 15 da 	. . . 
-	ani	01fh		;da1b	e6 1f 	. . 
-	cmp	e			;da1d	bb 	. 
-	jnz	wtSecTr		;da1e	c2 15 da 	. . . 
-	ret			;da21	c9 	. 
+rTrk676	dcx	h		;move back to last by read (offset 136)
+	mov	a,m
+	ora	a		;verify it is zero
+	jnz	reRead		;not zero, re-try the sector read
+	dcx	h		;move back to offset 135
+	inr	m		;should have 0ffh here
+	jnz	reRead		;0ffh not preset, re-try the sector read
+	lxi	h,altBuf+t6Trk	;verify 1st byte of altBuf matches track #
+	mov	a,m
+	ani	07fh		;get track number alone
+	pop	b
+	cmp	c		;track number in c match track # in data?
+	jnz	rdTrkEr		;no, have track number error
+	inx	h		;move to offset 1, should have sector num here
+	mov	a,m
+	cmp	b		;verify it matches requested sector number
+	jnz	reReadP		;sector match fail, retry the sector read
+	push	b
+	lhld	dmaAddr		;hl = destination address for the data
+	mov	b,h		;put hl into bc
+	mov	c,l
+	lxi	h,altBuf+t6Data	;data starts at byte 7 in altBuf
+	call	moveBuf		;move cpm sector to (dmaAddr), return checksum
+	lxi	h,altBuf+6	;add bytes 2,3,5 and 6 to checksum
+	mov	b,m		;b = byte 6
+	dcx	h
+	mov	c,m		;c = byte 5
+	dcx	h
+	mov	d,m		;d = byte 4 (checksum byte)
+	dcx	h
+	mov	e,m		;e = byte 3
+	dcx	h		;m = byte 2
+	add	e		;add bytes 3, 6, 5 and 2 (not 4) to checksum
+	add	b
+	add	c
+	add	m
+	cmp	d		;compare to checksum
+	jnz	reRead		;checksum fail, re-try the sector read
+	pop	b
+	xra	a		;otherwise, return success code
+	ret
 
-wrtSec:
-	call	selTrk		;da22	cd e6 da 	. . . 
-	rnz			;da25	c0 	. 
-	lda	flags		;da26	3a ff db 	: . . 
-	ani	fRawIO		;da29	e6 08 	. . 
-	jnz	setHCS		;da2b	c2 78 da 	. x . 
-	lda	trkNum		;da2e	3a 96 df 	: . . 
-	cpi	6		;da31	fe 06 	. . 
-	jnc	wTrk676		;da33	d2 53 da 	. S . 
-	push	b			;da36	c5 	. 
-	mov	a,c			;da37	79 	y 
-	lxi	b,altBuf		;da38	01 00 de 	. . . 
-	stax	b			;da3b	02 	. 
-	xra	a			;da3c	af 	. 
-	inx	b			;da3d	03 	. 
-	stax	b			;da3e	02 	. 
-	inr	a			;da3f	3c 	< 
-	inx	b			;da40	03 	. 
-	stax	b			;da41	02 	. 
-	inx	b			;da42	03 	. 
-	lhld	dmaAddr		;da43	2a 98 df 	* . . 
-	call	moveBuf		;da46	cd c6 da 	. . . 
-	mvi	a,0ffh		;da49	3e ff 	> . 
-	stax	b			;da4b	02 	. 
-	inx	b			;da4c	03 	. 
-	mov	a,d			;da4d	7a 	z 
-	stax	b			;da4e	02 	. 
-	pop	b			;da4f	c1 	. 
-	jmp	setHCS		;da50	c3 78 da 	. x . 
+; rdTrkEr - Track number error during the read operation
 
-wTrk676:
-	push	b			;da53	c5 	. 
-	lxi	b,altBuf+t6Data		;da54	01 07 de 	. . . 
-	lhld	dmaAddr		;da57	2a 98 df 	* . . 
-	call	moveBuf		;da5a	cd c6 da 	. . . 
-	mvi	a,0ffh		;da5d	3e ff 	> . 
-	stax	b			;da5f	02 	. 
-	inx	b			;da60	03 	. 
-	xra	a			;da61	af 	. 
-	stax	b			;da62	02 	. 
-	mov	a,d			;da63	7a 	z 
-	lhld	altBuf+2		;da64	2a 02 de 	* . . 
-	add	h			;da67	84 	. 
-	add	l			;da68	85 	. 
-	lhld	altBuf+5		;da69	2a 05 de 	* . . 
-	add	h			;da6c	84 	. 
-	add	l			;da6d	85 	. 
-	sta	altBuf+t6CSum		;da6e	32 04 de 	2 . . 
-	pop	b			;da71	c1 	. 
-	lxi	h,altBuf		;da72	21 00 de 	. . . 
-	mov	m,c			;da75	71 	q 
-	inx	h			;da76	23 	# 
-	mov	m,b			;da77	70 	p 
-setHCS:
-	mov	a,c			;da78	79 	y 
-	adi	(-43 and 0ffh)		;da79	c6 d5 	. . 
-	mvi	a,0		;da7b	3e 00 	> . 
-	rar			;da7d	1f 	. 
-	stc			;da7e	37 	7 
-	rar			;da7f	1f 	. 
-	mov	d,a			;da80	57 	W 
-	mov	a,b			;da81	78 	x 
-	call	altSkew		;da82	cd d5 da 	. . . 
-wtWrSec:
-	in	drvSec		;da85	db 09 	. . 
-	rar			;da87	1f 	. 
-	jc	wtWrSec		;da88	da 85 da 	. . . 
-	ani	01fh		;da8b	e6 1f 	. . 
-	cmp	e			;da8d	bb 	. 
-	jnz	wtWrSec		;da8e	c2 85 da 	. . . 
-	mov	a,d			;da91	7a 	z 
-	out	drvCtl		;da92	d3 09 	. . 
-	lxi	h,altBuf		;da94	21 00 de 	. . . 
-	lxi	b,0100h+altLen		;da97	01 89 01 	. . . 
-	mvi	d,enwdMsk		;da9a	16 01 	. . 
-	mvi	a,080h		;da9c	3e 80 	> . 
-	ora	m			;da9e	b6 	. 
-	mov	e,a			;da9f	5f 	_ 
-	inx	h			;daa0	23 	# 
-wrSec:
-	in	drvStat		;daa1	db 08 	. . 
-	ana	d			;daa3	a2 	. 
-	jnz	wrSec		;daa4	c2 a1 da 	. . . 
-	add	e			;daa7	83 	. 
-	out	drvData		;daa8	d3 0a 	. . 
-	mov	a,m			;daaa	7e 	~ 
-	inx	h			;daab	23 	# 
-	mov	e,m			;daac	5e 	^ 
-	inx	h			;daad	23 	# 
-	dcr	c			;daae	0d 	. 
-	jz	wrDone		;daaf	ca b8 da 	. . . 
-	dcr	c			;dab2	0d 	. 
-	out	drvData		;dab3	d3 0a 	. . 
-	jnz	wrSec		;dab5	c2 a1 da 	. . . 
-wrDone:
-	in	drvStat		;dab8	db 08 	. . 
-	ana	d			;daba	a2 	. 
-	jnz	wrDone		;dabb	c2 b8 da 	. . . 
-	out	drvData		;dabe	d3 0a 	. . 
-	dcr	b			;dac0	05 	. 
-	jnz	wrDone		;dac1	c2 b8 da 	. . . 
-	xra	a			;dac4	af 	. 
-	ret			;dac5	c9 	. 
+rdTrkEr	xra	a
+	call	reTkSec		;retry the track and sector seek
+	jmp	reReadP		;retry the sector read (push B entry)
+
+;  rdExit - exit read (raw) where data is left in altBuf
+
+rdExit	pop	b
+	xra	a
+	ret
+
+; rdPSec - read physical sector. Read the physical Altair sector (0-31)
+;    specified by e into the buffer specified by HL. Physical sector
+;    length is altLen (137) bytes.
+
+rdPSec	call	setSync		;sync to start of sector specified in e
+	mvi	c,altLen	;c = length of Altair sector (137 bytes)
+rdLoop	in	drvStat		;get drive status byte
+	ora	a		;wait for NRDA flag true (zero)
+	jm	rdLoop
+	in	drvData		;read the byte
+	mov	m,a		;store in the read buffer
+	inx	h		;increment buffer pointer
+	dcr	c		;decrement characters remaining in counter
+	jz	rDone		;count is zero - read is done
+	dcr	c		;decrement count for 2nd byte about to be read
+	nop			;timing
+	in	drvData		;get the 2nd byte
+	mov	m,a		;store in the read buffer
+	inx	h		;increment buffer pointer
+	jnz	rdLoop		;loop until all bytes read
+rDone	xra	a		;return success of zero = good read
+	ret
+
+; secSync - sync to start of sector specified in e. The sector number in e
+;    is an Altair physical sector number (0-31).
+
+setSync	call	ldHead		;load the drive head
+wtSecTr	in	drvSec		;read sector position register
+	rar			;wait for sector true flag (zero = true)
+	jc	wtSecTr
+	ani	01fh		;get sector number alone
+	cmp	e		;match sector num we're looking for?
+	jnz	wtSecTr
+	ret
+;------------------------------------------------------------------------------
+; wrtSec - Write a sector. Selects the drive in diskNum, seeks to the
+;    track in C and then writes the sector specified in B from the
+;    buffer pointed to by dmaAddr.
+;-----------------------------------------------------------------------------
+wrtSec	call	selTrk		;select the drive, seek to the proper track
+	rnz			;return if failed
+	lda	flags		;see if raw I/O flag is set
+	ani	fRawIO
+	jnz	setHCS		;raw I.O, write altBuf, go get head current
+	lda	trkNum		;process data differently depending on track #
+	cpi	6		;tracks 0-5 processed directly below
+	jnc	wTrk676		;jump to process tracks 6-76
+
+;  Sector write for tracks 0-5
+
+	push	b		;save sector number
+	mov	a,c		;a = track number
+	lxi	b,altBuf	;bc points to altair sector buffer
+	stax	b		;put track number at offset 0
+	xra	a		;put 0100h (16 bit) at offset 1,2
+	inx	b
+	stax	b
+	inr	a
+	inx	b
+	stax	b
+	inx	b		;bc = cpm data in altBuf at offset 3
+	lhld	dmaAddr		;hl = location from which to read data
+	call	moveBuf		;move cpm sector from (dmaAddr) to altBuf
+	mvi	a,0ffh		;offset 131 is stop byte (0ffh)
+	stax	b
+	inx	b		;offset 132 is checksum
+	mov	a,d		;a = checksum
+	stax	b		;store it at offset 132
+	pop	b
+	jmp	setHCS		;got set head current setting
+
+;  wTrk676 - write sector for tracks 6-76
+
+wTrk676	push	b		;save sector number
+	lxi	b,altBuf+t6Data	;bc = cpm data in altBuf at offset 7
+	lhld	dmaAddr		;hl = location from which to read data
+	call	moveBuf		;move cpm sector from (dmaAddr) to altBuf
+	mvi	a,0ffh		;offset 135 is stop byte (0ffh)
+	stax	b
+	inx	b		;offset 136 is unused (store zero)
+	xra	a
+	stax	b
+	mov	a,d		;a = checksum
+	lhld	altBuf+2	;add bytes at offset 2 and 3 to checksum
+	add	h
+	add	l
+	lhld	altBuf+5	;add bytes at offset 5 and 6 to checksum
+	add	h
+	add	l
+	sta	altBuf+t6CSum	;store final checksum at offset 4
+	pop	b
+	lxi	h,altBuf	;hl = pointer to altair sector buffer
+	mov	m,c		;store track number at offset 0
+	inx	h
+	mov	m,b		;store sector number at offset 1
+
+; setHCS - set the head current reduction (bit 6) for tracks 43-76.
+;   Also set the write bit (bit 7)
+
+setHCS	mov	a,c		;a = track number
+	adi	(-43 and 0ffh)	;add -43 (1st track for HCS bit = 1)
+	mvi	a,0		;set a=0 without affecting carry
+	rar			;080h if track >= 43
+	stc
+	rar			;0c0 if track >= 43, else 080h
+	mov	d,a		;d is the control command for the drive
+	mov	a,b		;a = sector number
+	call	altSkew		;do sector skew like Altair Disk Basic
+
+; wait for sector true and the right sector number
+
+wtWrSec	in	drvSec		;read sector position register
+	rar			;wait for sector true (0-true)
+	jc	wtWrSec
+	ani	01fh		;get sector number alone
+	cmp	e		;at the right sector yet?
+	jnz	wtWrSec		;no, keep looking
+	mov	a,d		;control command formed in d above (setHCS)
+	out	drvCtl		;issue write command
+	lxi	h,altBuf	;hl points to altair sector buffer
+	lxi	b,0100h+altLen	;c=137 bytes to write, b=1 byte of 0's at end
+	mvi	d,enwdMsk	;Enter New Write Data flag mask
+	mvi	a,080h		;1st byte of sector is sync byte
+	ora	m		;sync byte must have msb set
+	mov	e,a		;e = next byte to write
+	inx	h
+; wrSec - write physical sector loop
+
+wrSec	in	drvStat		;read drive status register
+	ana	d		;write flag (ENWD) asserted (zero)?
+	jnz	wrSec		;no, keep waiting
+	add	e		;put byte to write into accumulator
+	out	drvData		;write the byte
+	mov	a,m		;a = next byte to write
+	inx	h		;increment source buffer pointer
+	mov	e,m		;e = byte to write next time through this loop
+	inx	h		;increment source buffer pointer
+	dcr	c		;decrement chars remaining (bytes just written)
+	jz	wrDone		;zero - sector data written
+	dcr	c		;dec chars remaining (byte about to write)
+	out	drvData		;write 2nd byte
+	jnz	wrSec		;loop if count <> 0
+; wrDone - write is done. Now write # of zeros specified in b (just 1)
+
+wrDone	in	drvStat		;wait for another write flag
+	ana	d
+	jnz	wrDone
+	out	drvData		;write zero b times
+	dcr	b
+	jnz	wrDone
+	xra	a		;return success status
+	ret
 
 ;------------------------------------------------------------------------------
 ; moveBuf - move sector buffer (128 bytes) from (hl) to (bc). Compute
 ;   checksum on all bytes and return in a.
 ;------------------------------------------------------------------------------
-moveBuf:
-	mvi	d,0		;dac6	16 00 	. . 
-	mvi	e,secLen		;dac8	1e 80 	. . 
-movLoop:
-	mov	a,m			;daca	7e 	~ 
-	stax	b			;dacb	02 	. 
-	add	d			;dacc	82 	. 
-	mov	d,a			;dacd	57 	W 
-	inx	b			;dace	03 	. 
-	inx	h			;dacf	23 	# 
-	dcr	e			;dad0	1d 	. 
-	jnz	movLoop		;dad1	c2 ca da 	. . . 
-	ret			;dad4	c9 	. 
+moveBuf	mvi	d,0		;d = checksum
+	mvi	e,secLen	;e = buffer length (128 bytes)
+movLoop	mov	a,m		;move from (hl) to (bc)
+	stax	b
+	add	d		;add byte to checksum
+	mov	d,a
+	inx	b		;increment both pointers
+	inx	h
+	dcr	e		;decrement character count
+	jnz	movLoop		;loop until count = 0
+	ret
+
 ;------------------------------------------------------------------------------
 ; altSkew - Do Altair sector skew like disk basic. For sectors greater than 6,
 ;    physical = (logical * 17) mod 32. Returns physical sector number in e.
 ;    This is done on top of the secTran skew table mechanism of CPM. The math
 ;    works out such that this call to altSkew does almost nothing.
 ;------------------------------------------------------------------------------
-altSkew:
-	mov	e,a			;dad5	5f 	_ 
-	lda	trkNum		;dad6	3a 96 df 	: . . 
-	cpi	6		;dad9	fe 06 	. . 
-	rc			;dadb	d8 	. 
-	mov	a,e			;dadc	7b 	{ 
-	add	a			;dadd	87 	. 
-	add	a			;dade	87 	. 
-	add	a			;dadf	87 	. 
-	add	a			;dae0	87 	. 
-	add	e			;dae1	83 	. 
-	ani	01fh		;dae2	e6 1f 	. . 
-	mov	e,a			;dae4	5f 	_ 
-	ret			;dae5	c9 	. 
+altSkew	mov	e,a		;e = input sector number
+	lda	trkNum		;see if track number >= 6
+	cpi	6
+	rc			;track < 6, exit
+	mov	a,e		;multiply by 17
+	add	a
+	add	a
+	add	a
+	add	a
+	add	e
+	ani	01fh		;keep lower 5 bits (0-31)
+	mov	e,a
+	ret
+
 ;------------------------------------------------------------------------------
 ;  selTrk - select the drive, go to the proper track (specified in diskNum
 ;     and C)
 ;------------------------------------------------------------------------------
-selTrk:	mvi     a,maxTry        ;set retry count (5 tries)
-	sta	rtryCnt		;dae8	32 9c df 	2 . . 
-	call	selDrv		;daeb	cd 46 db 	. F . 
-	rnz			;daee	c0 	. 
-	mov	a,m			;daef	7e 	~ 
-	cpi	unTrack		;daf0	fe 7f 	.  
-reTkSec:
-	cz	ldSeek0		;daf2	cc ae db 	. . . 
-	mov	a,m			;daf5	7e 	~ 
-	mov	m,c			;daf6	71 	q 
-	mov	e,a			;daf7	5f 	_ 
-	call	ldHead		;daf8	cd 7f db 	.  . 
-	mov	a,e			;dafb	7b 	{ 
-	sub	c			;dafc	91 	. 
-	rz			;dafd	c8 	. 
-	mvi	d,dcStepI		;dafe	16 01 	. . 
-	jc	mulStep		;db00	da 07 db 	. . . 
-	mvi	d,dcStepO		;db03	16 02 	. . 
-	cma			;db05	2f 	/ 
-	inr	a			;db06	3c 	< 
+selTrk	mvi     a,maxTry        ;set retry count (5 tries)
+	sta	rtryCnt
+	call	selDrv		;returns with HL=trkTable entry for this drive
+	rnz
+	mov	a,m		;a = track this drive is presently on
+	cpi	unTrack		;if unknown track number, seek to track zero
+reTkSec	cz	ldSeek0		;if 7f, load head and seek to track 0
+	mov	a,m		;a = track number drive is presently on
+	mov	m,c		;put distination track num in the track table
+	mov	e,a		;e = track number drive is presently on
+	call	ldHead		;load the drive head
+	mov	a,e		;a = current track, c = desired track
+	sub	c		;a = current - desired
+	rz			;difference is zero - on proper track alreadyj
+	mvi	d,dcStepI	;step in to higher tracks if desired > current
+	jc	mulStep
+	mvi	d,dcStepO	;step out to lower tracks if desired < current
+	cma			;make it a negative value (1's complement + 1)
+	inr	a
 
 ; mulStep - issue multiple track steps in or out (controller step command
 ;    in d). The number of tracks to step is passed as -steps. E.g., 10
 ;    steps passed as -10.
-mulStep:
-	mov	e,a			;db07	5f 	_ 
-wMoveOk:
-	in	drvStat		;db08	db 08 	. . 
-	ani	moveMsk		;db0a	e6 02 	. . 
-	jnz	wMoveOk		;db0c	c2 08 db 	. . . 
-	mov	a,d			;db0f	7a 	z 
-	out	drvCtl		;db10	d3 09 	. . 
-	mov	a,e			;db12	7b 	{ 
-	inr	a			;db13	3c 	< 
-	jnz	mulStep		;db14	c2 07 db 	. . . 
-	call	rtryChk		;db17	cd cd db 	. . . 
-	jz	stpDone		;db1a	ca 23 db 	. # . 
-	call	selTrk0		;db1d	cd ab db 	. . . 
-	jmp	retErr		;db20	c3 d6 db 	. . . 
-stpDone:
-	lda	trkVrfy		;db23	3a 9a df 	: . . 
-	ora	a			;db26	b7 	. 
-	jnz	vrfyTrk		;db27	c2 30 db 	. 0 . 
-	lda	flags		;db2a	3a ff db 	: . . 
-	ani	fRawIO		;db2d	e6 80 	. . 
-	rz			;db2f	c8 	. 
+
+mulStep	mov	e,a		;e = -tracks left to step
+wMoveOk	in	drvStat		;get drive status register
+	ani	moveMsk		;wait until it's OK to move the head
+	jnz	wMoveOk
+	mov	a,d		;issue step in or out per command d
+	out	drvCtl
+	mov	a,e		;e has -tracks to step, counting up to zero
+	inr	a
+	jnz	mulStep		;loop until we've stepped to the desired track
+	call	rtryChk		;decrement and check retry counter
+	jz	stpDone		;retry count OK
+	call	selTrk0		;max tries reached - return error
+	jmp	retErr
+
+stpDone	lda	trkVrfy		;track number verification flag set?
+	ora	a
+	jnz	vrfyTrk		;yes, verify track on disk = computed track
+	lda	flags		;see if the force track verify flag is set
+	ani	fTrkVfy		;if so, verify the track data anyway
+	rz
 
 ;  vrfyTrk - Verify we're on the right track (passed in c) by reading
 ;     the track number that is stored in the sync byte at the start
 ;     of every sector. We don't care which sector we read.
-vrfyTrk:
-	in	drvSec		;db30	db 09 	. . 
-	rar			;db32	1f 	. 
-	jc	vrfyTrk		;db33	da 30 db 	. 0 . 
-wtVrfy:
-	in	drvStat		;db36	db 08 	. . 
-	ora	a			;db38	b7 	. 
-	jm	wtVrfy		;db39	fa 36 db 	. 6 . 
-	in	drvData		;db3c	db 0a 	. . 
-	ani	07fh		;db3e	e6 7f 	. 
-	cmp	c			;db40	b9 	. 
-	rz			;db41	c8 	. 
-	xra	a			;db42	af 	. 
-	jmp	reTkSec		;db43	c3 f2 da 	. . . 
+
+vrfyTrk	in	drvSec		;wait for sector true (any sector)
+	rar
+	jc	vrfyTrk
+wtVrfy	in	drvStat		;wait for new read data available flag
+	ora	a
+	jm	wtVrfy		;wait for NRDA flag
+	in	drvData		;get sync byte (contains track number)
+	ani	07fh		;get the track number alone
+	cmp	c
+	rz			;we're on the right track number
+	xra	a
+	jmp	reTkSec		;otherwise, retry track and sector seek
+
 ;-----------------------------------------------------------------------------
 ;  selDrv - select the drive specified in diskNum
 ;-----------------------------------------------------------------------------
 selDrv:
-	lda	diskNum		;db46	3a 95 df 	: . . 
-	mov	e,a			;db49	5f 	_ 
-	lda	selNum		;db4a	3a 9b df 	: . . 
-	cmp	e			;db4d	bb 	. 
-	mov	a,e			;db4e	7b 	{ 
-	sta	selNum		;db4f	32 9b df 	2 . . 
-	jnz	selNew		;db52	c2 5c db 	. \ . 
-	in	drvStat		;db55	db 08 	. . 
-	ani	selMask		;db57	e6 08 	. . 
-	jz	rTrkTbl		;db59	ca 6c db 	. l . 
+	lda	diskNum		;diskNum is the disk that CPM wants to use
+	mov	e,a
+	lda	selNum		;disk currently selected on the controller
+	cmp	e		;same drive as already selected?
+	mov	a,e
+	sta	selNum		;set selected drive = diskNum
+	jnz	selNew		;not the same drive, select new drive
+	in	drvStat		;make sure the drive is still selected
+	ani	selMask
+	jz	rTrkTbl		;drive selected, retrieve the track table ptr
 ;
 ;  selNew - select a new drive, deselect the current, then select the new
-selNew:
-	mvi	a,dSelect		;db5c	3e ff 	> . 
-	out	drvSel		;db5e	d3 08 	. . 
-	lda	selNum		;db60	3a 9b df 	: . . 
-	out	drvSel		;db63	d3 08 	. . 
-	in	drvStat		;db65	db 08 	. . 
-	ani	selMask		;db67	e6 08 	. . 
-	jnz	selNew		;db69	c2 5c db 	. \ . 
-rTrkTbl:
-	lda	numDisk		;db6c	3a fb db 	: . . 
-	cmp	e			;db6f	bb 	. 
-	jc	retErr		;db70	da d6 db 	. . . 
-	lxi	h,trkTbl		;db73	21 9e df 	. . . 
-	mvi	d,0		;db76	16 00 	. . 
-	dad	d			;db78	19 	. 
-	ora	m			;db79	b6 	. 
-	jm	retErr		;db7a	fa d6 db 	. . . 
-	xra	a			;db7d	af 	. 
-	ret			;db7e	c9 	. 
-ldHead:
-	in	drvStat		;db7f	db 08 	. . 
-	ani	headMsk		;db81	e6 04 	. . 
-	rz			;db83	c8 	. 
-	mvi	a,dcLoad		;db84	3e 04 	> . 
-	out	drvCtl		;db86	d3 09 	. . 
-wtHead:
-	in	drvStat		;db88	db 08 	. . 
-	ani	headMsk		;db8a	e6 04 	. . 
-	jnz	wtHead		;db8c	c2 88 db 	. . . 
-	ret			;db8f	c9 	. 
 
-uldHead:
-	mvi	a,dcUload		;db90	3e 08 	> . 
-	out	drvCtl		;db92	d3 09 	. . 
-	ret			;db94	c9 	. 
+selNew	mvi	a,dSelect	;deselect the attached drive
+	out	drvSel
+	lda	selNum		;drive number to select
+	out	drvSel
+	in	drvStat		;loop until drive is selected
+	ani	selMask
+	jnz	selNew
 
-sdb95h:
-	lxi	h,flags		;db95	21 ff db 	. . . 
-	mov	a,m			;db98	7e 	~ 
-	ani	0f7h		;db99	e6 f7 	. . 
-	mov	m,a			;db9b	77 	w 
-	mvi	a,07fh		;db9c	3e 7f 	>  
-	sta	selNum		;db9e	32 9b df 	2 . . 
-	lxi	h,07f7fh		;dba1	21 7f 7f 	.   
-	shld	trkTbl		;dba4	22 9e df 	" . . 
-	shld	0dfa0h		;dba7	22 a0 df 	" . . 
-	ret			;dbaa	c9 	. 
+; rTrkTbl - return track table pointer. Also validates the drive number
+;    passed in e. Returns with HL pointing to the trkTbl entry for drive in e.
 
-selTrk0:
-	call	selDrv		;dbab	cd 46 db 	. F . 
-ldSeek0:
-	call	ldHead		;dbae	cd 7f db 	.  . 
-seek0:
-	in	drvStat		;dbb1	db 08 	. . 
-	ani	moveMsk		;dbb3	e6 02 	. . 
-	jnz	seek0		;dbb5	c2 b1 db 	. . . 
-	mvi	a,dcStepO		;dbb8	3e 02 	> . 
-	out	drvCtl		;dbba	d3 09 	. . 
-	in	drvStat		;dbbc	db 08 	. . 
-	ani	trk0Msk		;dbbe	e6 40 	. @ 
-	jnz	seek0		;dbc0	c2 b1 db 	. . . 
-	lda	selNum		;dbc3	3a 9b df 	: . . 
-	mov	e,a			;dbc6	5f 	_ 
-	call	rTrkTbl		;dbc7	cd 6c db 	. l . 
-	mvi	m,0		;dbca	36 00 	6 . 
-	ret			;dbcc	c9 	. 
+rTrkTbl	lda	numDisk		;drive number OK? (should be 3 here?)
+	cmp	e		;e has drive number
+	jc	retErr		;error if drive number > 4 (should 3 be used?)
+	lxi	h,trkTbl	;index by drive number (e) into track table
+	mvi	d,0		;de = 16 bit drive number
+	dad	d
+	ora	m		;test for msb set in track number
+	jm	retErr		;track number invalid is msbit is set
+	xra	a		;else, return zero
+	ret
+
+;------------------------------------------------------------------------------
+;  ldHead - If head already loaded, return. Otherwise, issue the head load
+;       command and wait for it to load.
+;------------------------------------------------------------------------------
+ldHead	in	drvStat		;get drive status
+	ani	headMsk		;get head loaded bit alone
+	rz			;zero = true, head is loaded
+	mvi	a,dcLoad	;issue the load head command
+	out	drvCtl
+wtHead	in	drvStat		;get drive status
+	ani	headMsk		;wait for head loaded to be true
+	jnz	wtHead
+	ret
+
+;------------------------------------------------------------------------------
+;  uldHead - Issued the unload head command
+;------------------------------------------------------------------------------
+uldHead	mvi	a,dcUload	;issue head unload command
+	out	drvCtl
+	ret
+
+clrDrv:
+	lxi	h,flags	
+	mov	a,m
+	ani	0f7h
+	mov	m,a		;clear force track verification
+	mvi	a,07fh	
+	sta	selNum		;no drive selected
+	lxi	h,07f7fh	;no track selected
+	shld	trkTbl
+	shld	trkTbl+2
+	ret
+
+;-----------------------------------------------------------------------------
+; selTrk0 - Select drive in diskNum, load head and seek to track 0
+;   ldSeek0 - Load head and seek to track 0
+;-----------------------------------------------------------------------------
+selTrk0	call	selDrv		;select drive is diskNum
+ldSeek0	call	ldHead		;load the drive head
+seek0	in	drvStat		;get drive status register
+	ani	moveMsk		;loop until OK to move the head
+	jnz	seek0
+	mvi	a,dcStepO	;issue step out command
+	out	drvCtl
+	in	drvStat	
+	ani	trk0Msk		;loop until we get to track 0
+	jnz	seek0
+	lda	selNum		;selNum is diskNum once drive is selected
+	mov	e,a
+	call	rTrkTbl		;HL = track table pointer for this drive
+	mvi	m,0		;set track number for this drive to zero
+	ret
 
 ;------------------------------------------------------------------------------
 ; rtryChk - retry counter check. Decrement retry counter. Returns zero if
 ;     more tries left, non-zero if retry counter reaches zero.
 ;------------------------------------------------------------------------------
-rtryChk:
-	lxi	h,rtryCnt		;dbcd	21 9c df 	. . . 
-	dcr	m			;dbd0	35 	5 
-	jz	retErr		;dbd1	ca d6 db 	. . . 
-	xra	a			;dbd4	af 	. 
-	ret			;dbd5	c9 	. 
-;
+rtryChk	lxi	h,rtryCnt
+	dcr	m
+	jz	retErr
+	xra	a
+	ret
+
 ; retErr - Return error code with 1 in accumulator and non-zero status flag
-retErr:
-	mvi	a,1		;dbd6	3e 01 	> . 
-	ora	a			;dbd8	b7 	. 
-	ret			;dbd9	c9 	. 
+
+retErr	mvi	a,1
+	ora	a
+	ret
 
 	nop			;dbda	00 	. 
 	nop			;dbdb	00 	. 
@@ -880,69 +931,75 @@ flags:	db	0		;dbff	00 	.
 
 fCldCmd equ	001h		;true = CCP process cmd on cold start
 fWrmCmd equ	002h		;true = CCP process cmd on warm start
+fMntDsk	equ	004h		;true = single disk mounting
 fRawIO  equ	008h		;r/w directly from altBuf
 fEnaInt equ	010h		;enable interrupts after disk I/O
 fWrtVfy equ	040h		;write verify flag (true = verify)
 fTrkVfy equ	080h		;force track number verification
 
-sdc00h:
-	jmp	ldc1dh		;dc00	c3 1d dc 	. . . 
-sdc03h:
-	jmp	ldc1bh		;dc03	c3 1b dc 	. . . 
-const:
-	jmp	ldc1bh		;dc06	c3 1b dc 	. . . 
-conin:
-	jmp	ldc1bh		;dc09	c3 1b dc 	. . . 
-conout:
-	jmp	ldc1bh		;dc0c	c3 1b dc 	. . . 
-list:
-	jmp	ldc1bh		;dc0f	c3 1b dc 	. . . 
-punch:
-	jmp	ldc1bh		;dc12	c3 1b dc 	. . . 
-reader:
-	jmp	ldc1bh		;dc15	c3 1b dc 	. . . 
-listst:
-	jmp	ldc1bh		;dc18	c3 1b dc 	. . . 
-ldc1bh:
+
+;------------------------------------------------------------------------------
+; USER AREA for CP/M2 on Altair.
+;
+; Copyright (C) 1981 Lifeboat Associates
+;
+; Default user area
+;------------------------------------------------------------------------------
+
+; JUMP TABLE - Jumps MUST remain here in same order.
+
+cinit:	jmp	cinitr		;Cold boot init
+winit:	jmp	nulUser		;Warm boot init
+const:	jmp	nulUser		;Console status
+conin:	jmp	nulUser		;Console input
+conout:	jmp	nulUser		;Console output
+list:	jmp	nulUser		;Printer output
+punch:	jmp	nulUser		;Punch output
+reader:	jmp	nulUser		;Reader input
+listst:	jmp	nulUser		;Printer status
+
+;
+; NULL User Function
+nulUser:
 	xra	a			;dc1b	af 	. 
 	ret			;dc1c	c9 	. 
-ldc1dh:
-	lxi	d,0c107h		;dc1d	11 07 c1 	. . . 
-	lxi	h,ldc50h		;dc20	21 50 dc 	. P . 
-	mvi	b,008h		;dc23	06 08 	. . 
-	call	sdc58h		;dc25	cd 58 dc 	. X . 
-	lxi	h,0c9afh		;dc28	21 af c9 	. . . 
+
+cinitr:
+	lxi	d,cmdLen		;dc1d	11 07 c1 	. . . 
+	lxi	h,config		;dc20	21 50 dc 	. P . 
+	mvi	b,cfgLen		;dc23	06 08 	. . 
+	call	autoRun		;dc25	cd 58 dc 	. X . 
+	lxi	h,bdos+0afh	;bdos wait$err
 	shld	const		;dc2b	22 06 dc 	" . . 
 	shld	conin		;dc2e	22 09 dc 	" . . 
 	shld	conout		;dc31	22 0c dc 	" . . 
-	mvi	a,0c3h		;dc34	3e c3 	> . 
+	mvi	a,jmp		;dc34	3e c3 	> . 
 	sta	wbootv		;dc36	32 00 00 	2 . . 
 	sta	bdosv		;dc39	32 05 00 	2 . . 
 	lxi	h,wboote		;dc3c	21 03 d7 	. . . 
-	shld	00001h		;dc3f	22 01 00 	" . . 
-	lxi	h,0c906h		;dc42	21 06 c9 	. . . 
-	shld	00006h		;dc45	22 06 00 	" . . 
+	shld	wboota		;dc3f	22 01 00 	" . . 
+	lxi	h,bdos+bdosa		;dc42	21 06 c9 	. . . 
+	shld	bdosa		;dc45	22 06 00 	" . . 
 	xra	a			;dc48	af 	. 
-	sta	00004h		;dc49	32 04 00 	2 . . 
+	sta	cdisk		;dc49	32 04 00 	2 . . 
 	mov	c,a			;dc4c	4f 	O 
-	jmp	0c100h		;dc4d	c3 00 c1 	. . . 
-ldc50h:
-	mvi	b,043h		;dc50	06 43 	. C 
-	mov	c,a			;dc52	4f 	O 
-	mov	c,m			;dc53	4e 	N 
-	mov	b,m			;dc54	46 	F 
-	mov	c,c			;dc55	49 	I 
-	mov	b,a			;dc56	47 	G 
-	nop			;dc57	00 	. 
-sdc58h:
+	jmp	ccp		;dc4d	c3 00 c1 	. . . 
+
+config: db	6, 'CONFIG', 0
+cfgLen	equ	$-config
+
+autoRun:
 	mov	a,m			;dc58	7e 	~ 
 	stax	d			;dc59	12 	. 
 	inx	h			;dc5a	23 	# 
 	inx	d			;dc5b	13 	. 
 	dcr	b			;dc5c	05 	. 
-	jnz	sdc58h		;dc5d	c2 58 dc 	. X . 
+	jnz	autoRun		;dc5d	c2 58 dc 	. X . 
 	ret			;dc60	c9 	. 
+
 ;
+; User Patch Area
+userPatch:
 	ds	415		;dc61-ddff
 
 ;------------------------------------------------------------------------------
@@ -997,7 +1054,7 @@ dmaAddr ds	2		;dma address for disk operations
 trkVrfy	ds	1		;verify track number if <> 0
 selNum  ds      1               ;disk number currently selected on controller
 rtryCnt	ds	1		;retry counter
-	ds	1
+cldDone	db	0		;true after cold start has completed
 trkTbl	db	unTrack, unTrack, unTrack, unTrack
 
 biosEnd	equ	($ AND 0fc00h)+0400h	;round msb up to next 1K boundary
