@@ -199,10 +199,10 @@ entCpm:	mvi	a,0c3h		;8080 "jmp" opcode
 	jz	coldSt		;jump if this is cold start
 	ani	FWRMCMD		;warm start - run default command line?
 	jmp	cmdChk
+
 coldSt:	ani	FCLDCMD		;cold start - run default command line?
 cmdChk:	jz	CCP+3		;no, enter CCP and clear cmd line
 	jmp	CCP		;yes, enter CCP with possible cmd line
-
 
 ; loadTrk - load one track into memory. Read odd sectors into every other 
 ;    128 bytes of memory until the BIOS base address is reached or all
@@ -344,6 +344,7 @@ xlate:
 
 coninul	call	uldHead
 	jmp	conin
+
 	push	b
 	call	uldHead
 	pop	b
