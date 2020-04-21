@@ -3,17 +3,28 @@
 ; provided by Mike Douglas at deramp.com
 ;
 
-	org	0d700h
-
 ; CPM module locations
 
+; Change MSIZE to the desired CP/M memory size in K.
+msize	equ	24		; Distribution size
 
-bootLen	equ	3*128		;Boot Length
+bootLen	equ	3*128		;Boot length
 ccpLen	equ	0800h		;CPM 2.2 fixed
 bdosLen	equ	0e00h		;CPM 2.2 fixed
-ccp	equ	$-bdosLen-ccpLen
-bdos	equ	$-bdosLen
-bios	equ	$
+biosLen	equ	0900h		;BIOS length
+sysgen	equ	0900h		;SYSGEN image location
+cpmove	equ	0900h		;CPMOVE image location
+
+; These equates are automatically changed by msize.
+bios	equ	(msize*1024)-biosLen	; Memory location of BIOS
+ccp	equ	bios-bdosLen-ccpLen
+bdos	equ	bios-bdosLen
+offset	equ	bootLen+ccpLen+bdosLen			;offset in SYSGEN CPMXX.COM file
+overlay	equ	sysgen-bios+bootLen+ccpLen+bdosLen	;to overlay SYSGEN image
+movcpm	equ	cpmove-bios+ccpLen+bdosLen		;to overlay MOVCPM image
+soffset	equ	sysgen+bootLen+ccpLen+bdosLen		;offset in SYSGEN image
+
+	org	bios
 
 ; CCP
 
@@ -119,7 +130,8 @@ wboote:	jmp	wboot
 signon:
 	db	cr,lf
 	db	'CP/M2 on Altair',cr,lf
-	db	'56K Vers 2.20  ',cr,lf
+	db	'0'+(msize/10),'0'+(msize mod 10)
+	db	'K Vers 2.20  ',cr,lf
 	db	'(c) 1981 Lifeboat Associates$'
 
 ; print message at HL to '$'
