@@ -1,12 +1,21 @@
+;--------------------------------------------------------------------
 ;
-; Original disassembly of the Lifeboat BIOS from LIFEBOAT.DSK
-; provided by Mike Douglas at deramp.com
+;	CP/M 2.20 BIOS for Lifeboat Associates CP/M2 for
+;	MITS Altair 8800x and 88-DCCD Floppy Drive
 ;
+;	Original disassembly of the Lifeboat BIOS from LIFEBOAT.DSK
+;	provided by Mike Douglas at deramp.com
+;
+;	Source code regeneration by Patrick Linstruth, April 2020
+;
+;--------------------------------------------------------------------
+	
 
 ; CPM module locations
 
 ; Change MSIZE to the desired CP/M memory size in K.
-MSIZE	equ	24		; Distribution size
+
+MSIZE	equ	24		;Distribution size
 
 BOOTLEN	equ	3*128		;Boot length
 CCPLEN	equ	0800h		;CPM 2.2 fixed
@@ -26,7 +35,7 @@ SOFFSET	equ	SYSGEN+BOOTLEN+CCPLEN+BDOSLEN		;offset in SYSGEN image
 
 	org	bios
 
-; CCP
+; CCP equates
 
 CMDLEN	equ	CCP+7		;command length
 
@@ -112,7 +121,7 @@ LF	equ	10		;ascii for line feed
 	jmp	boot
 wboote:	jmp	wboot
 	jmp	const
-	jmp	coninul		;d709	c3 c9 d8 	. . . conin with unload?
+	jmp	coninul			;unload head before conin
 	jmp	conout
 	jmp	list
 	jmp	punch
@@ -341,6 +350,8 @@ sectran:
 xlate:
 	db	01,09,17,25,03,11,19,27,05,13,21,29,07,15,23,31
 	db	02,10,18,26,04,12,20,28,06,14,22,30,08,16,24,32
+
+; coninul - First unloads the head then calls standard conin
 
 coninul	call	uldHead
 	jmp	conin
